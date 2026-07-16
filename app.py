@@ -3,13 +3,20 @@ import plotly.graph_objects as go
 import smtplib
 from email.message import EmailMessage
 import os
-from datetime import datetime  # <-- NUEVA LIBRERÍA PARA LA FECHA Y HORA
+from datetime import datetime
+import pytz  # <-- NUEVA LIBRERÍA PARA ZONAS HORARIAS
+
+def obtener_hora_cdmx():
+    """Función auxiliar para obtener la hora exacta de la CDMX"""
+    zona_cdmx = pytz.timezone('America/Mexico_City')
+    return datetime.now(zona_cdmx)
 
 def enviar_correo(email_destino, nombre_usuario, figura):
     """Genera el PDF y lo envía por correo electrónico usando SMTP"""
     
-    # Formato de fecha para el nombre del archivo (Ej: 20260716_153025)
-    fecha_hora_archivo = datetime.now().strftime("%Y%m%d_%H%M%S")
+    # Obtenemos la hora de la CDMX para el nombre del archivo
+    ahora_cdmx = obtener_hora_cdmx()
+    fecha_hora_archivo = ahora_cdmx.strftime("%Y%m%d_%H%M%S")
     nombre_archivo = f"Rueda_Vida_{nombre_usuario.replace(' ', '_')}_{fecha_hora_archivo}.pdf"
     
     # 1. Guardar el gráfico como PDF temporalmente en el servidor
@@ -72,8 +79,9 @@ for cat in categorias:
 categorias_grafico = categorias + [categorias[0]]
 valores_grafico = valores + [valores[0]]
 
-# Obtener fecha y hora actual con formato legible (Ej: 16/07/2026 a las 15:30)
-fecha_hora_visible = datetime.now().strftime("%d/%m/%Y a las %H:%M")
+# Obtenemos la hora de la CDMX para mostrarla en el gráfico
+ahora_cdmx = obtener_hora_cdmx()
+fecha_hora_visible = ahora_cdmx.strftime("%d/%m/%Y a las %H:%M")
 
 fig = go.Figure()
 fig.add_trace(go.Scatterpolar(
@@ -85,14 +93,14 @@ fig.add_trace(go.Scatterpolar(
     fillcolor='rgba(44, 62, 80, 0.4)'
 ))
 
-# Configuramos el diseño y agregamos la fecha como un subtítulo (usando HTML en el título)
+# Configuramos el diseño y agregamos la fecha
 fig.update_layout(
     polar=dict(radialaxis=dict(visible=True, range=[0, 10])),
     showlegend=False,
     title=dict(
-        text=f"Rueda de la Vida de {nombre_display}<br><sup style='color:gray;'>Generado el: {fecha_hora_visible}</sup>", 
+        text=f"Rueda de la Vida de {nombre_display}<br><sup style='color:gray;'>Generado el: {fecha_hora_visible} (CDMX)</sup>", 
         font=dict(size=20),
-        y=0.95 # Subimos un poco el título para que quepa bien el subtítulo
+        y=0.95
     )
 )
 
