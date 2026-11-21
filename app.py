@@ -5,9 +5,14 @@ import smtplib
 from email.message import EmailMessage
 from datetime import datetime
 import pytz
+import requests
 
 # --- 1. CONFIGURACIÓN DE PÁGINA ---
 st.set_page_config(page_title="Mi Rueda de la Vida", page_icon="🎡", layout="centered")
+
+# Estado de sesión para evitar registros duplicados del mismo participante
+if "ultima_firma_guardada" not in st.session_state:
+    st.session_state.ultima_firma_guardada = ""
 
 def obtener_hora_cdmx():
     """Obtiene la fecha y hora exacta de la Ciudad de México."""
@@ -16,14 +21,34 @@ def obtener_hora_cdmx():
 
 @st.cache_data(show_spinner=False)
 def exportar_en_memoria(_figura, formato, _firma_datos):
-    """
-    Convierte el gráfico a PNG o PDF directamente en la memoria RAM.
-    El uso de @st.cache_data evita que el servidor recalcule la imagen si los datos no han cambiado.
-    """
+    """Convierte el gráfico a PNG o PDF directamente en la memoria RAM."""
     return _figura.to_image(format=formato, width=850, height=850, scale=2)
 
+def guardar_en_google_sheets(fecha_hora, nombre, correo, valores, promedio, superpoder, area_enfoque):
+    """Envía los resultados del participante a Google Sheets vía Webhook."""
+    if "SHEETS_WEBHOOK_URL" not in st.secrets:
+        return False, "Falta configurar SHEETS_WEBHOOK_URL en los Secrets de Streamlit."
+    
+    payload = {
+        "fecha_hora": fecha_hora,
+        "nombre": nombre,
+        "correo": correo if correo else "No proporcionado",
+        "corporalidad": int(valores[0]),
+        "creatividad": int(valores[1]),
+        "caracter": int(valores[2]),
+        "afectividad": int(valores[3]),
+        "sociabilidad": int(valores[4]),
+        "espiritualidad": int(valores[5]),
+        "promedio": round(float(promedio), 2),
+        "superpoder": superpoder,
+        "area_enfoque": area_enfoque
+    }
+    
+    respuesta = requests.post(st.secrets["SHEETS_WEBHOOK_URL"], json=payload, timeout=10)
+    return (respuesta.status_code == 200), respuesta.text
+
 def enviar_correo_ram(email_destino, nombre_usuario, bytes_pdf, nombre_archivo, promedio, area_fuerte):
-    """Envía el PDF adjunto leyendo los bytes directamente desde la RAM (sin guardar en disco)."""
+    """Envía el PDF adjunto leyendo los bytes directamente desde la RAM."""
     msg = EmailMessage()
     msg['Subject'] = f'🎡 Tu Rueda de la Vida - {nombre_usuario}'
     msg['From'] = st.secrets["EMAIL_SENDER"]
@@ -45,7 +70,7 @@ def enviar_correo_ram(email_destino, nombre_usuario, bytes_pdf, nombre_archivo, 
         smtp.login(st.secrets["EMAIL_SENDER"], st.secrets["EMAIL_PASSWORD"])
         smtp.send_message(msg)
 
-# --- 2. DEFINICIÓN DE LAS 6 ÁREAS (EMOJIS + COLORES + MICRO-COPYS) ---
+# --- 2. DEFINICIÓN DE LAS 6 ÁREAS ---
 areas = [
     {
         "nombre": "🏃‍♂️ Corporalidad",
@@ -79,7 +104,7 @@ areas = [
     }
 ]
 
-# --- 3. ENCABEZADO Y CAPTURA INTERACTIVA (BAJA FRICCIÓN) ---
+# --- 3. ENCABEZADO Y CAPTURA INTERACTIVA ---
 st.title("🎡 Tu Rueda de la Vida")
 st.markdown("Mueve los controles del **1** *(total descuido)* al **10** *(plenitud total)* y descubre qué tan equilibrada rueda tu vida hoy.")
 
@@ -102,7 +127,7 @@ for i, area in enumerate(areas):
         st.caption(area["pregunta"])
         valores.append(val)
 
-# --- 4. DIAGNÓSTICO AUTOMÁTICO EN VIVO (GAMIFICACIÓN) ---
+# --- 4. DIAGNÓSTICO AUTOMÁTICO EN VIVO ---
 st.divider()
 st.subheader("2️⃣ Tu Diagnóstico en Vivo")
 
@@ -114,13 +139,11 @@ indice_min = int(np.argmin(valores))
 area_fuerte = areas[indice_max]["nombre"]
 area_debil = areas[indice_min]["nombre"]
 
-# Tarjetas de métricas rápidas
 m1, m2, m3 = st.columns(3)
 m1.metric("⚡ Balance General", f"{int(promedio * 10)}%", f"{promedio:.1f} / 10 pts")
 m2.metric("🔥 Tu Superpoder", area_fuerte, f"Nivel {valores[indice_max]}")
 m3.metric("🎯 Área de Enfoque", area_debil, f"Nivel {valores[indice_min]}", delta_color="off")
 
-# Mensaje personalizado según la forma de la rueda
 if promedio >= 8 and desviacion < 1.5:
     st.success("🌟 **¡Rueda Todo Terreno!** Tienes un nivel de plenitud alto y muy parejo. Tu vida gira con muchísima fluidez. ¡Sigue manteniendo esos hábitos!")
 elif desviacion >= 2.2:
@@ -130,24 +153,22 @@ elif promedio < 5.5:
 else:
     st.info(f"⚖️ **Rueda en Crecimiento:** Llevas un ritmo estable y equilibrado. Para pasar al siguiente nivel, apóyate en tu fortaleza (**{area_fuerte}**) para impulsar **{area_debil}**.")
 
-# --- 5. PERSONALIZACIÓN Y GRÁFICO CON REBANADAS DE COLORES ---
+# --- 5. PERSONALIZACIÓN Y GRÁFICO ---
 st.divider()
 st.subheader("3️⃣ Tu Mapa Visual")
 
-nombre_input = st.text_input("Escribe tu nombre o apodo para personalizar el gráfico:", placeholder="Ej. Alex Rivera")
+nombre_input = st.text_input("Escribe tu nombre o apodo (obligatorio para registrar y descargar):", placeholder="Ej. Alex Rivera")
 nombre_display = nombre_input.strip() if nombre_input.strip() else "Explorador(a)"
 
 ahora_cdmx = obtener_hora_cdmx()
 fecha_hora_visible = ahora_cdmx.strftime("%d/%m/%Y • %H:%M")
 
-# Ángulos fijos para las 6 rebanadas (60 grados cada una)
 angulos_base = [0, 60, 120, 180, 240, 300]
 nombres_categorias = [a["nombre"] for a in areas]
 colores_rebanadas = [a["color"] for a in areas]
 
 fig = go.Figure()
 
-# A. Capa de Fondo: Las 6 Rebanadas de colores (Barpolar que llega siempre a 10)
 fig.add_trace(go.Barpolar(
     r=[10] * 6,
     theta=angulos_base,
@@ -159,7 +180,6 @@ fig.add_trace(go.Barpolar(
     showlegend=False
 ))
 
-# B. Capa Principal: La Telaraña del Usuario (Scatterpolar)
 angulos_cerrados = angulos_base + [angulos_base[0]]
 valores_cerrados = valores + [valores[0]]
 textos_hover = nombres_categorias + [nombres_categorias[0]]
@@ -214,15 +234,35 @@ fig.update_layout(
 
 st.plotly_chart(fig, use_container_width=True)
 
-# --- 6. DESCARGA DIRECTA (PNG / PDF) Y ENVÍO POR CORREO ---
+# --- 6. REGISTRO EN GOOGLE SHEETS, DESCARGA Y CORREO ---
 st.divider()
-st.subheader("4️⃣ Guarda o Comparte tu Resultado")
-st.write("Descarga tu rueda directamente a tu celular para compartirla en WhatsApp o Historias, o envíala a tu correo.")
+st.subheader("4️⃣ Registra y Guarda tu Resultado")
 
 nombre_limpio = nombre_display.replace(" ", "_")
 fecha_archivo = ahora_cdmx.strftime("%Y%m%d_%H%M")
-firma_actual = f"{nombre_display}_{valores}_{fecha_hora_visible}"
+firma_actual = f"{nombre_display}_{valores}"
 
+# A. Botón de registro directo en el taller (Google Sheets)
+if st.button("✅ Registrar mi Rueda en el Taller", use_container_width=True, type="primary"):
+    if not nombre_input.strip():
+        st.warning("⚠️ Por favor escribe tu nombre o apodo arriba (en el paso 3) antes de registrar.")
+    elif st.session_state.ultima_firma_guardada == firma_actual:
+        st.info("ℹ️ Tus resultados actuales ya están registrados en el taller.")
+    else:
+        with st.spinner("Registrando tu participación..."):
+            try:
+                ok, detalle = guardar_en_google_sheets(
+                    fecha_hora_visible, nombre_display, "", valores, promedio, area_fuerte, area_debil
+                )
+                if ok:
+                    st.session_state.ultima_firma_guardada = firma_actual
+                    st.success("🎉 ¡Participación registrada con éxito! Ahora puedes descargar tu imagen abajo.")
+                else:
+                    st.error(f"⚠️ No se pudo registrar en la hoja: {detalle}")
+            except Exception as e:
+                st.error(f"❌ Error de conexión al registrar: {e}")
+
+# B. Preparación de archivos en RAM para descarga directa
 try:
     bytes_png = exportar_en_memoria(fig, "png", firma_actual)
     bytes_pdf = exportar_en_memoria(fig, "pdf", firma_actual)
@@ -240,8 +280,7 @@ if exportacion_lista:
             data=bytes_png,
             file_name=f"Rueda_{nombre_limpio}_{fecha_archivo}.png",
             mime="image/png",
-            use_container_width=True,
-            type="primary"
+            use_container_width=True
         )
         
     with col_pdf:
@@ -253,17 +292,31 @@ if exportacion_lista:
             use_container_width=True
         )
 
-    # Opción de correo plegable para no saturar la pantalla móvil
+    # C. Opción de correo (también registra en Google Sheets si no lo había hecho antes)
     with st.expander("📩 ¿Prefieres recibir el PDF en tu correo electrónico?"):
         correo_input = st.text_input("Tu correo electrónico:", placeholder="ejemplo@correo.com")
-        if st.button("Enviar a mi correo", use_container_width=True):
+        if st.button("Enviar a mi correo y registrar", use_container_width=True):
             if not correo_input or "@" not in correo_input or "." not in correo_input:
                 st.warning("⚠️ Por favor escribe un correo electrónico válido.")
             else:
-                with st.spinner("Enviando correo..."):
+                with st.spinner("Guardando registro y enviando correo..."):
+                    # 1. Guardar en Google Sheets (si aún no se ha guardado esta combinación)
+                    firma_con_correo = f"{firma_actual}_{correo_input.strip()}"
+                    if st.session_state.ultima_firma_guardada != firma_con_correo:
+                        try:
+                            ok, _ = guardar_en_google_sheets(
+                                fecha_hora_visible, nombre_display, correo_input.strip(),
+                                valores, promedio, area_fuerte, area_debil
+                            )
+                            if ok:
+                                st.session_state.ultima_firma_guardada = firma_con_correo
+                        except Exception:
+                            pass # No bloqueamos el envío de correo si falla Sheets
+
+                    # 2. Enviar el correo con el PDF desde la RAM
                     try:
                         nombre_pdf = f"Rueda_{nombre_limpio}_{fecha_archivo}.pdf"
                         enviar_correo_ram(correo_input.strip(), nombre_display, bytes_pdf, nombre_pdf, promedio, area_fuerte)
-                        st.success(f"✅ ¡Listo! Revisa la bandeja de entrada de {correo_input}.")
+                        st.success(f"✅ ¡Listo! Resultado registrado y enviado a {correo_input}.")
                     except Exception as e:
                         st.error(f"❌ No se pudo enviar el correo. Usa los botones de descarga directa de arriba. ({e})")
