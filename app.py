@@ -165,8 +165,8 @@ if st.button("🚀 Enviar Resultados a mi Consejero y Habilitar Descarga para No
                 nombre_png = f"Rueda_Vida_{clan}_{nombre_limpio}_{fecha_hora_archivo}.png"
                 
                 # Generar PDF y PNG directamente en memoria RAM con Kaleido
-                bytes_pdf = fig.to_image(format="pdf", engine="kaleido")
-                bytes_png = fig.to_image(format="png", engine="kaleido", width=900, height=750, scale=2)
+                bytes_pdf = fig.to_image(format="pdf")
+                bytes_png = fig.to_image(format="png", width=900, height=750, scale=2)
                 
                 # Enviar correo al Rover y al Consejero
                 enviar_correo(
