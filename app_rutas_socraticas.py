@@ -310,8 +310,8 @@ if modo == "🧭 1. Taller Individual (Rutas + Cartas + SMART)":
             st.warning(f"🔴 **1. {titulo_carta_debil}**\n\n*\"{texto_carta_debil}\"*")
         with c_carta2:
             st.info(f"🟢 **2. Fortaleza y Servicio**\n\n*\"{carta_fortaleza}\"*")
-        with c_carta3:
-            st.secondary(f"📐 **3. Geometría ({geometria})**\n\n*\"{carta_geometria}\"*" if hasattr(st, 'secondary') else st.markdown(f"> 📐 **3. Geometría ({geometria})**\n>\n> *\"{carta_geometria}\"*"))
+       with c_carta3:
+            st.success(f"📐 **3. Geometría ({geometria})**\n\n*\"{carta_geometria}\"*")
 
         respuesta_socratica = st.text_area(
             "✍️ PASO A: Responde sin rodeos a tu Carta Roja de Enfoque (¿Qué hábito te sabotea y cómo lo vas a transformar en acción?):",
