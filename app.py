@@ -1,6 +1,8 @@
 import streamlit as st
 import plotly.graph_objects as go
+import matplotlib.pyplot as plt
 import numpy as np
+import io
 import smtplib
 from email.message import EmailMessage
 from datetime import datetime
@@ -10,7 +12,6 @@ import requests
 # --- 1. CONFIGURACIÓN DE PÁGINA ---
 st.set_page_config(page_title="Mi Rueda de la Vida", page_icon="🎡", layout="centered")
 
-# Estado de sesión para evitar registros duplicados del mismo participante
 if "ultima_firma_guardada" not in st.session_state:
     st.session_state.ultima_firma_guardada = ""
 
@@ -20,15 +21,83 @@ def obtener_hora_cdmx():
     return datetime.now(zona_cdmx)
 
 @st.cache_data(show_spinner=False)
-def exportar_en_memoria(_figura, formato, _firma_datos):
-    """Convierte el gráfico a PNG o PDF directamente en la memoria RAM."""
-    return _figura.to_image(format=formato, width=850, height=850, scale=2)
+def generar_archivos_ram(nombre_usuario, valores, promedio, fecha_hora_visible):
+    """
+    Genera la imagen PNG y el documento PDF directamente en la memoria RAM usando Matplotlib.
+    Evita dependencias pesadas como kaleido y no deja archivos temporales en el servidor.
+    """
+    categorias_pdf = [
+        'Corporalidad', 'Creatividad', 'Carácter',
+        'Afectividad', 'Sociabilidad', 'Espiritualidad'
+    ]
+    colores_hex = ['#FF9999', '#FFE082', '#D1B3FF', '#FFB366', '#99CCFF', '#80CBC4']
+    N = len(categorias_pdf)
+    angulos = [n / float(N) * 2 * np.pi for n in range(N)]
+
+    valores_cerrados = list(valores) + [valores[0]]
+    angulos_cerrados = angulos + [angulos[0]]
+
+    fig, ax = plt.subplots(figsize=(8.5, 8.5), subplot_kw=dict(polar=True))
+    fig.patch.set_facecolor('white')
+    ax.set_facecolor('white')
+
+    ax.set_theta_offset(np.pi / 2)
+    ax.set_theta_direction(-1)
+
+    # 6 Rebanadas de colores
+    ancho_rebanada = 2 * np.pi / N
+    for i in range(N):
+        ax.bar(
+            angulos[i], 10, width=ancho_rebanada, bottom=0,
+            color=colores_hex[i], alpha=0.55, edgecolor='white', linewidth=2
+        )
+
+    # Cuadrícula concéntrica
+    ax.set_rlabel_position(0)
+    ax.set_yticks([2, 4, 6, 8, 10])
+    ax.set_yticklabels(["2", "4", "6", "8", "10"], color="#475569", size=9, fontweight='bold')
+    ax.set_ylim(0, 10)
+
+    # Etiquetas exteriores
+    ax.set_xticks(angulos)
+    ax.set_xticklabels(categorias_pdf, color='#0F172A', size=12, fontweight='bold')
+    ax.tick_params(axis='x', which='major', pad=28)
+
+    # Polígono del participante
+    ax.plot(angulos_cerrados, valores_cerrados, linewidth=3, linestyle='solid', color='#1E293B')
+    ax.fill(angulos_cerrados, valores_cerrados, color='#1E293B', alpha=0.30)
+    ax.scatter(angulos, valores, color='#1E293B', s=65, zorder=5)
+
+    # Título y subtítulo con fecha CDMX
+    plt.suptitle(
+        f"Rueda de la Vida de {nombre_usuario}",
+        fontsize=18, fontweight='bold', color='#0F172A', y=0.97
+    )
+    ax.set_title(
+        f"Balance General: {promedio:.1f}/10   |   {fecha_hora_visible} (CDMX)",
+        fontsize=11, color='#64748B', pad=38
+    )
+
+    plt.tight_layout()
+
+    # Guardar PNG en memoria
+    buf_png = io.BytesIO()
+    fig.savefig(buf_png, format='png', dpi=200, bbox_inches='tight', facecolor='white')
+    bytes_png = buf_png.getvalue()
+
+    # Guardar PDF en memoria
+    buf_pdf = io.BytesIO()
+    fig.savefig(buf_pdf, format='pdf', bbox_inches='tight', facecolor='white')
+    bytes_pdf = buf_pdf.getvalue()
+
+    plt.close(fig)
+    return bytes_png, bytes_pdf
 
 def guardar_en_google_sheets(fecha_hora, nombre, correo, valores, promedio, superpoder, area_enfoque):
     """Envía los resultados del participante a Google Sheets vía Webhook."""
     if "SHEETS_WEBHOOK_URL" not in st.secrets:
         return False, "Falta configurar SHEETS_WEBHOOK_URL en los Secrets de Streamlit."
-    
+
     payload = {
         "fecha_hora": fecha_hora,
         "nombre": nombre,
@@ -43,7 +112,7 @@ def guardar_en_google_sheets(fecha_hora, nombre, correo, valores, promedio, supe
         "superpoder": superpoder,
         "area_enfoque": area_enfoque
     }
-    
+
     respuesta = requests.post(st.secrets["SHEETS_WEBHOOK_URL"], json=payload, timeout=10)
     return (respuesta.status_code == 200), respuesta.text
 
@@ -53,7 +122,7 @@ def enviar_correo_ram(email_destino, nombre_usuario, bytes_pdf, nombre_archivo, 
     msg['Subject'] = f'🎡 Tu Rueda de la Vida - {nombre_usuario}'
     msg['From'] = st.secrets["EMAIL_SENDER"]
     msg['To'] = email_destino
-    
+
     cuerpo = (
         f"¡Hola, {nombre_usuario}!\n\n"
         f"Aquí tienes el resultado de tu Rueda de la Vida generada hoy.\n\n"
@@ -65,7 +134,7 @@ def enviar_correo_ram(email_destino, nombre_usuario, bytes_pdf, nombre_archivo, 
     )
     msg.set_content(cuerpo)
     msg.add_attachment(bytes_pdf, maintype='application', subtype='pdf', filename=nombre_archivo)
-    
+
     with smtplib.SMTP_SSL('smtp.gmail.com', 465) as smtp:
         smtp.login(st.secrets["EMAIL_SENDER"], st.secrets["EMAIL_PASSWORD"])
         smtp.send_message(msg)
@@ -242,7 +311,6 @@ nombre_limpio = nombre_display.replace(" ", "_")
 fecha_archivo = ahora_cdmx.strftime("%Y%m%d_%H%M")
 firma_actual = f"{nombre_display}_{valores}"
 
-# A. Botón de registro directo en el taller (Google Sheets)
 if st.button("✅ Registrar mi Rueda en el Taller", use_container_width=True, type="primary"):
     if not nombre_input.strip():
         st.warning("⚠️ Por favor escribe tu nombre o apodo arriba (en el paso 3) antes de registrar.")
@@ -262,10 +330,8 @@ if st.button("✅ Registrar mi Rueda en el Taller", use_container_width=True, ty
             except Exception as e:
                 st.error(f"❌ Error de conexión al registrar: {e}")
 
-# B. Preparación de archivos en RAM para descarga directa
 try:
-    bytes_png = exportar_en_memoria(fig, "png", firma_actual)
-    bytes_pdf = exportar_en_memoria(fig, "pdf", firma_actual)
+    bytes_png, bytes_pdf = generar_archivos_ram(nombre_display, tuple(valores), promedio, fecha_hora_visible)
     exportacion_lista = True
 except Exception as e:
     exportacion_lista = False
@@ -273,7 +339,7 @@ except Exception as e:
 
 if exportacion_lista:
     col_png, col_pdf = st.columns(2)
-    
+
     with col_png:
         st.download_button(
             label="📸 Descargar Imagen (PNG)",
@@ -282,7 +348,7 @@ if exportacion_lista:
             mime="image/png",
             use_container_width=True
         )
-        
+
     with col_pdf:
         st.download_button(
             label="📄 Descargar Documento (PDF)",
@@ -292,7 +358,6 @@ if exportacion_lista:
             use_container_width=True
         )
 
-    # C. Opción de correo (también registra en Google Sheets si no lo había hecho antes)
     with st.expander("📩 ¿Prefieres recibir el PDF en tu correo electrónico?"):
         correo_input = st.text_input("Tu correo electrónico:", placeholder="ejemplo@correo.com")
         if st.button("Enviar a mi correo y registrar", use_container_width=True):
@@ -300,7 +365,6 @@ if exportacion_lista:
                 st.warning("⚠️ Por favor escribe un correo electrónico válido.")
             else:
                 with st.spinner("Guardando registro y enviando correo..."):
-                    # 1. Guardar en Google Sheets (si aún no se ha guardado esta combinación)
                     firma_con_correo = f"{firma_actual}_{correo_input.strip()}"
                     if st.session_state.ultima_firma_guardada != firma_con_correo:
                         try:
@@ -311,9 +375,8 @@ if exportacion_lista:
                             if ok:
                                 st.session_state.ultima_firma_guardada = firma_con_correo
                         except Exception:
-                            pass # No bloqueamos el envío de correo si falla Sheets
+                            pass
 
-                    # 2. Enviar el correo con el PDF desde la RAM
                     try:
                         nombre_pdf = f"Rueda_{nombre_limpio}_{fecha_archivo}.pdf"
                         enviar_correo_ram(correo_input.strip(), nombre_display, bytes_pdf, nombre_pdf, promedio, area_fuerte)
