@@ -10,10 +10,10 @@ import pytz
 import requests
 
 # --- 1. CONFIGURACIÓN DE PÁGINA ---
-st.set_page_config(page_title="Mi Rueda de la Vida", page_icon="🎡", layout="centered")
+st.set_page_config(page_title="Rueda de la Vida Rover", page_icon="⚜️", layout="centered")
 
-if "ultima_firma_guardada" not in st.session_state:
-    st.session_state.ultima_firma_guardada = ""
+if "firma_registrada" not in st.session_state:
+    st.session_state.firma_registrada = ""
 
 def obtener_hora_cdmx():
     """Obtiene la fecha y hora exacta de la Ciudad de México."""
@@ -22,10 +22,7 @@ def obtener_hora_cdmx():
 
 @st.cache_data(show_spinner=False)
 def generar_archivos_ram(nombre_usuario, valores, promedio, fecha_hora_visible):
-    """
-    Genera la imagen PNG y el documento PDF directamente en la memoria RAM usando Matplotlib.
-    Evita dependencias pesadas como kaleido y no deja archivos temporales en el servidor.
-    """
+    """Genera la imagen PNG y el documento PDF directamente en la memoria RAM."""
     categorias_pdf = [
         'Corporalidad', 'Creatividad', 'Carácter',
         'Afectividad', 'Sociabilidad', 'Espiritualidad'
@@ -44,7 +41,6 @@ def generar_archivos_ram(nombre_usuario, valores, promedio, fecha_hora_visible):
     ax.set_theta_offset(np.pi / 2)
     ax.set_theta_direction(-1)
 
-    # 6 Rebanadas de colores
     ancho_rebanada = 2 * np.pi / N
     for i in range(N):
         ax.bar(
@@ -52,25 +48,21 @@ def generar_archivos_ram(nombre_usuario, valores, promedio, fecha_hora_visible):
             color=colores_hex[i], alpha=0.55, edgecolor='white', linewidth=2
         )
 
-    # Cuadrícula concéntrica
     ax.set_rlabel_position(0)
     ax.set_yticks([2, 4, 6, 8, 10])
     ax.set_yticklabels(["2", "4", "6", "8", "10"], color="#475569", size=9, fontweight='bold')
     ax.set_ylim(0, 10)
 
-    # Etiquetas exteriores
     ax.set_xticks(angulos)
     ax.set_xticklabels(categorias_pdf, color='#0F172A', size=12, fontweight='bold')
     ax.tick_params(axis='x', which='major', pad=28)
 
-    # Polígono del participante
     ax.plot(angulos_cerrados, valores_cerrados, linewidth=3, linestyle='solid', color='#1E293B')
     ax.fill(angulos_cerrados, valores_cerrados, color='#1E293B', alpha=0.30)
     ax.scatter(angulos, valores, color='#1E293B', s=65, zorder=5)
 
-    # Título y subtítulo con fecha CDMX
     plt.suptitle(
-        f"Rueda de la Vida de {nombre_usuario}",
+        f"Rueda de la Vida — {nombre_usuario}",
         fontsize=18, fontweight='bold', color='#0F172A', y=0.97
     )
     ax.set_title(
@@ -80,12 +72,10 @@ def generar_archivos_ram(nombre_usuario, valores, promedio, fecha_hora_visible):
 
     plt.tight_layout()
 
-    # Guardar PNG en memoria
     buf_png = io.BytesIO()
     fig.savefig(buf_png, format='png', dpi=200, bbox_inches='tight', facecolor='white')
     bytes_png = buf_png.getvalue()
 
-    # Guardar PDF en memoria
     buf_pdf = io.BytesIO()
     fig.savefig(buf_pdf, format='pdf', bbox_inches='tight', facecolor='white')
     bytes_pdf = buf_pdf.getvalue()
@@ -94,14 +84,14 @@ def generar_archivos_ram(nombre_usuario, valores, promedio, fecha_hora_visible):
     return bytes_png, bytes_pdf
 
 def guardar_en_google_sheets(fecha_hora, nombre, correo, valores, promedio, superpoder, area_enfoque):
-    """Envía los resultados del participante a Google Sheets vía Webhook."""
+    """Envía los resultados del Rover a Google Sheets vía Webhook."""
     if "SHEETS_WEBHOOK_URL" not in st.secrets:
-        return False, "Falta configurar SHEETS_WEBHOOK_URL en los Secrets de Streamlit."
+        return False, "Falta configurar SHEETS_WEBHOOK_URL en los Secrets."
 
     payload = {
         "fecha_hora": fecha_hora,
         "nombre": nombre,
-        "correo": correo if correo else "No proporcionado",
+        "correo": correo,
         "corporalidad": int(valores[0]),
         "creatividad": int(valores[1]),
         "caracter": int(valores[2]),
@@ -116,35 +106,66 @@ def guardar_en_google_sheets(fecha_hora, nombre, correo, valores, promedio, supe
     respuesta = requests.post(st.secrets["SHEETS_WEBHOOK_URL"], json=payload, timeout=10)
     return (respuesta.status_code == 200), respuesta.text
 
-def enviar_correo_ram(email_destino, nombre_usuario, bytes_pdf, nombre_archivo, promedio, area_fuerte):
-    """Envía el PDF adjunto leyendo los bytes directamente desde la RAM."""
-    msg = EmailMessage()
-    msg['Subject'] = f'🎡 Tu Rueda de la Vida - {nombre_usuario}'
-    msg['From'] = st.secrets["EMAIL_SENDER"]
-    msg['To'] = email_destino
-
-    cuerpo = (
-        f"¡Hola, {nombre_usuario}!\n\n"
-        f"Aquí tienes el resultado de tu Rueda de la Vida generada hoy.\n\n"
-        f"📊 Tu Resumen Rápido:\n"
-        f"• Balance General: {promedio:.1f} / 10\n"
-        f"• Tu Superpoder actual: {area_fuerte}\n\n"
-        f"Adjunto encontrarás tu gráfico en formato PDF listo para imprimir o guardar.\n"
-        f"¡Mucho éxito en tu camino de crecimiento!"
-    )
-    msg.set_content(cuerpo)
-    msg.add_attachment(bytes_pdf, maintype='application', subtype='pdf', filename=nombre_archivo)
+def enviar_correos_ram(email_rover, nombre_usuario, bytes_pdf, nombre_archivo, promedio, area_fuerte, area_debil, valores):
+    """Envía el PDF al Rover y una copia de respaldo al correo del responsable del Clan."""
+    remitente = st.secrets["EMAIL_SENDER"]
+    # Si defines ADMIN_EMAIL en Secrets lo usará; si no, lo enviará al mismo EMAIL_SENDER
+    correo_responsable = st.secrets.get("ADMIN_EMAIL", remitente)
 
     with smtplib.SMTP_SSL('smtp.gmail.com', 465) as smtp:
-        smtp.login(st.secrets["EMAIL_SENDER"], st.secrets["EMAIL_PASSWORD"])
-        smtp.send_message(msg)
+        smtp.login(remitente, st.secrets["EMAIL_PASSWORD"])
+
+        # 1. Correo para el Rover
+        msg_rover = EmailMessage()
+        msg_rover['Subject'] = f'⚜️ Tu Rueda de la Vida Rover — {nombre_usuario}'
+        msg_rover['From'] = remitente
+        msg_rover['To'] = email_rover
+
+        cuerpo_rover = (
+            f"¡Hola, {nombre_usuario}! ¡Siempre Listo para Servir!\n\n"
+            f"Aquí tienes el resultado de tu Rueda de la Vida:\n\n"
+            f"📊 Resumen de tu evaluación:\n"
+            f"• Balance General: {promedio:.1f} / 10\n"
+            f"• Fortaleza principal: {area_fuerte}\n"
+            f"• Área de oportunidad: {area_debil}\n\n"
+            f"Adjunto encontrarás tu mapa visual en formato PDF para tu seguimiento personal en el Clan.\n"
+            f"¡Buena caza y largas lunas!"
+        )
+        msg_rover.set_content(cuerpo_rover)
+        msg_rover.add_attachment(bytes_pdf, maintype='application', subtype='pdf', filename=nombre_archivo)
+        smtp.send_message(msg_rover)
+
+        # 2. Copia de respaldo para ti (Responsable / Scouter)
+        msg_admin = EmailMessage()
+        msg_admin['Subject'] = f'📋 Nuevo Registro Rover: {nombre_usuario} ({promedio:.1f}/10)'
+        msg_admin['From'] = remitente
+        msg_admin['To'] = correo_responsable
+
+        cuerpo_admin = (
+            f"Se ha registrado una nueva Rueda de la Vida en el Clan:\n\n"
+            f"• Rover: {nombre_usuario}\n"
+            f"• Correo: {email_rover}\n"
+            f"• Balance General: {promedio:.1f} / 10\n"
+            f"• Fortaleza: {area_fuerte} | Enfoque: {area_debil}\n\n"
+            f"Desglose por áreas:\n"
+            f"- Corporalidad: {valores[0]}/10\n"
+            f"- Creatividad: {valores[1]}/10\n"
+            f"- Carácter: {valores[2]}/10\n"
+            f"- Afectividad: {valores[3]}/10\n"
+            f"- Sociabilidad: {valores[4]}/10\n"
+            f"- Espiritualidad: {valores[5]}/10\n\n"
+            f"Se adjunta el PDF generado."
+        )
+        msg_admin.set_content(cuerpo_admin)
+        msg_admin.add_attachment(bytes_pdf, maintype='application', subtype='pdf', filename=nombre_archivo)
+        smtp.send_message(msg_admin)
 
 # --- 2. DEFINICIÓN DE LAS 6 ÁREAS ---
 areas = [
     {
         "nombre": "🏃‍♂️ Corporalidad",
         "color": "rgba(255, 99, 132, 0.45)",
-        "pregunta": "¿Qué tal andas de energía, sueño, alimentación y ejercicio?"
+        "pregunta": "¿Qué tal andas de energía, sueño, alimentación y actividad física?"
     },
     {
         "nombre": "💡 Creatividad",
@@ -154,7 +175,7 @@ areas = [
     {
         "nombre": "🛡️ Carácter",
         "color": "rgba(153, 102, 255, 0.45)",
-        "pregunta": "¿Cómo sientes tu autocontrol, disciplina, resiliencia y metas?"
+        "pregunta": "¿Cómo sientes tu autocontrol, disciplina, resiliencia y metas personales?"
     },
     {
         "nombre": "❤️ Afectividad",
@@ -164,7 +185,7 @@ areas = [
     {
         "nombre": "🤝 Sociabilidad",
         "color": "rgba(54, 162, 235, 0.45)",
-        "pregunta": "¿Qué tan conectado te sientes con tus amigos, comunidad y servicio?"
+        "pregunta": "¿Qué tan conectado te sientes con el Clan, tus amigos y el servicio?"
     },
     {
         "nombre": "🕊️ Espiritualidad",
@@ -174,10 +195,10 @@ areas = [
 ]
 
 # --- 3. ENCABEZADO Y CAPTURA INTERACTIVA ---
-st.title("🎡 Tu Rueda de la Vida")
-st.markdown("Mueve los controles del **1** *(total descuido)* al **10** *(plenitud total)* y descubre qué tan equilibrada rueda tu vida hoy.")
+st.title("⚜️ Rueda de la Vida Rover")
+st.markdown("Evalúa tu momento actual del **1** *(descuido)* al **10** *(plenitud)* en cada una de las 6 áreas de desarrollo personal.")
 
-st.subheader("1️⃣ Evalúa tu momento actual")
+st.subheader("1️⃣ Evalúa tus 6 áreas")
 
 valores = []
 col1, col2 = st.columns(2)
@@ -210,24 +231,21 @@ area_debil = areas[indice_min]["nombre"]
 
 m1, m2, m3 = st.columns(3)
 m1.metric("⚡ Balance General", f"{int(promedio * 10)}%", f"{promedio:.1f} / 10 pts")
-m2.metric("🔥 Tu Superpoder", area_fuerte, f"Nivel {valores[indice_max]}")
+m2.metric("🔥 Tu Fortaleza", area_fuerte, f"Nivel {valores[indice_max]}")
 m3.metric("🎯 Área de Enfoque", area_debil, f"Nivel {valores[indice_min]}", delta_color="off")
 
 if promedio >= 8 and desviacion < 1.5:
-    st.success("🌟 **¡Rueda Todo Terreno!** Tienes un nivel de plenitud alto y muy parejo. Tu vida gira con muchísima fluidez. ¡Sigue manteniendo esos hábitos!")
+    st.success("🌟 **¡Rueda Equilibrada!** Tienes un nivel de plenitud alto y parejo en tus áreas de desarrollo. ¡Sigue manteniendo ese ritmo en tu ruta!")
 elif desviacion >= 2.2:
-    st.warning(f"🎢 **¡Alerta de Bache!** Destacas muchísimo en **{area_fuerte}**, pero la diferencia con **{area_debil}** hace que tu rueda dé saltos al girar. Pequeñas mejoras en {area_debil} te darán mucha paz.")
+    st.warning(f"🎢 **¡Alerta de Desbalance!** Destacas mucho en **{area_fuerte}**, pero la diferencia con **{area_debil}** frena tu avance. Pequeñas acciones en {area_debil} te darán mayor equilibrio.")
 elif promedio < 5.5:
-    st.info(f"🌱 **Etapa de Reconstrucción:** Es totalmente válido pasar por momentos de baja energía. No intentes subir todo de golpe; elige una acción pequeña hoy para impulsar **{area_debil}**.")
+    st.info(f"🌱 **Etapa de Reconstrucción:** Es válido pasar por momentos de baja energía. No intentes subir todo de golpe; elige un reto pequeño hoy para impulsar **{area_debil}**.")
 else:
-    st.info(f"⚖️ **Rueda en Crecimiento:** Llevas un ritmo estable y equilibrado. Para pasar al siguiente nivel, apóyate en tu fortaleza (**{area_fuerte}**) para impulsar **{area_debil}**.")
+    st.info(f"⚖️ **Rueda en Movimiento:** Llevas un ritmo estable. Apóyate en tu fortaleza (**{area_fuerte}**) para impulsar **{area_debil}** en tu plan personal.")
 
-# --- 5. PERSONALIZACIÓN Y GRÁFICO ---
+# --- 5. VISTA PREVIA DEL GRÁFICO ---
 st.divider()
-st.subheader("3️⃣ Tu Mapa Visual")
-
-nombre_input = st.text_input("Escribe tu nombre o apodo (obligatorio para registrar y descargar):", placeholder="Ej. Alex Rivera")
-nombre_display = nombre_input.strip() if nombre_input.strip() else "Explorador(a)"
+st.subheader("3️⃣ Vista Previa de tu Mapa")
 
 ahora_cdmx = obtener_hora_cdmx()
 fecha_hora_visible = ahora_cdmx.strftime("%d/%m/%Y • %H:%M")
@@ -262,7 +280,7 @@ fig.add_trace(go.Scatterpolar(
     marker=dict(color='#1E293B', size=9),
     text=textos_hover,
     hovertemplate="<b>%{text}</b><br>Nivel: %{r}/10<extra></extra>",
-    name=nombre_display
+    name="Vista Previa"
 ))
 
 fig.update_layout(
@@ -291,10 +309,10 @@ fig.update_layout(
         )
     ),
     showlegend=False,
-    margin=dict(t=100, b=50, l=65, r=65),
+    margin=dict(t=80, b=50, l=65, r=65),
     title=dict(
-        text=f"<b>Rueda de la Vida de {nombre_display}</b><br><sup style='color:#64748B;'>Balance: {promedio:.1f}/10  |  {fecha_hora_visible} (CDMX)</sup>",
-        font=dict(size=20, color="#0F172A"),
+        text=f"<b>Balance General: {promedio:.1f}/10</b><br><sup style='color:#64748B;'>{fecha_hora_visible} (CDMX)</sup>",
+        font=dict(size=18, color="#0F172A"),
         x=0.5,
         xanchor="center",
         y=0.95
@@ -303,83 +321,84 @@ fig.update_layout(
 
 st.plotly_chart(fig, use_container_width=True)
 
-# --- 6. REGISTRO EN GOOGLE SHEETS, DESCARGA Y CORREO ---
+# --- 6. REGISTRO OBLIGATORIO ANTES DE DESCARGAR ---
 st.divider()
-st.subheader("4️⃣ Registra y Guarda tu Resultado")
+st.subheader("4️⃣ Registra tus Datos para Descargar")
+st.info("🔒 Para desbloquear la descarga de tu **Imagen (PNG)** y **Documento (PDF)**, ingresa tu nombre y correo electrónico. Se enviará una copia en PDF a tu correo y al registro del Clan.")
 
-nombre_limpio = nombre_display.replace(" ", "_")
-fecha_archivo = ahora_cdmx.strftime("%Y%m%d_%H%M")
-firma_actual = f"{nombre_display}_{valores}"
+col_nom, col_mail = st.columns(2)
+with col_nom:
+    nombre_input = st.text_input("Nombre completo:", placeholder="Ej. Alex Rivera")
+with col_mail:
+    correo_input = st.text_input("Correo electrónico:", placeholder="alex@correo.com")
 
-if st.button("✅ Registrar mi Rueda en el Taller", use_container_width=True, type="primary"):
-    if not nombre_input.strip():
-        st.warning("⚠️ Por favor escribe tu nombre o apodo arriba (en el paso 3) antes de registrar.")
-    elif st.session_state.ultima_firma_guardada == firma_actual:
-        st.info("ℹ️ Tus resultados actuales ya están registrados en el taller.")
+nombre_limpio = nombre_input.strip()
+correo_limpio = correo_input.strip()
+firma_actual = f"{nombre_limpio}_{correo_limpio}_{valores}"
+
+if st.button("📩 Registrar y Desbloquear Descargas", use_container_width=True, type="primary"):
+    if not nombre_limpio:
+        st.warning("⚠️ Por favor escribe tu nombre completo.")
+    elif not correo_limpio or "@" not in correo_limpio or "." not in correo_limpio:
+        st.warning("⚠️ Por favor escribe un correo electrónico válido.")
+    elif st.session_state.firma_registrada == firma_actual:
+        st.info("ℹ️ Estos resultados ya fueron registrados y enviados. Puedes descargar tus archivos abajo.")
     else:
-        with st.spinner("Registrando tu participación..."):
+        with st.spinner("Registrando en el Clan y enviando PDF por correo..."):
             try:
-                ok, detalle = guardar_en_google_sheets(
-                    fecha_hora_visible, nombre_display, "", valores, promedio, area_fuerte, area_debil
+                bytes_png, bytes_pdf = generar_archivos_ram(
+                    nombre_limpio, tuple(valores), promedio, fecha_hora_visible
                 )
-                if ok:
-                    st.session_state.ultima_firma_guardada = firma_actual
-                    st.success("🎉 ¡Participación registrada con éxito! Ahora puedes descargar tu imagen abajo.")
-                else:
-                    st.error(f"⚠️ No se pudo registrar en la hoja: {detalle}")
+                nombre_archivo_base = nombre_limpio.replace(" ", "_")
+                fecha_archivo = ahora_cdmx.strftime("%Y%m%d_%H%M")
+                nombre_pdf = f"Rueda_Rover_{nombre_archivo_base}_{fecha_archivo}.pdf"
+
+                # 1. Guardar en Google Sheets
+                ok_sheets, detalle_sheets = guardar_en_google_sheets(
+                    fecha_hora_visible, nombre_limpio, correo_limpio,
+                    valores, promedio, area_fuerte, area_debil
+                )
+                if not ok_sheets:
+                    st.error(f"⚠️ Error al guardar en la hoja de registro: {detalle_sheets}")
+                    st.stop()
+
+                # 2. Enviar PDF al Rover y a tu correo
+                enviar_correos_ram(
+                    correo_limpio, nombre_limpio, bytes_pdf, nombre_pdf,
+                    promedio, area_fuerte, area_debil, valores
+                )
+
+                # 3. Desbloquear botones de descarga
+                st.session_state.firma_registrada = firma_actual
+                st.success(f"✅ ¡Registro completado! Se envió el PDF a **{correo_limpio}** y al registro del Clan. Ya puedes descargar tus archivos:")
+
             except Exception as e:
-                st.error(f"❌ Error de conexión al registrar: {e}")
+                st.error(f"❌ Ocurrió un error al procesar el registro o envío de correo: {e}")
 
-try:
-    bytes_png, bytes_pdf = generar_archivos_ram(nombre_display, tuple(valores), promedio, fecha_hora_visible)
-    exportacion_lista = True
-except Exception as e:
-    exportacion_lista = False
-    st.error(f"⚠️ No se pudo preparar la descarga: {e}")
+# --- 7. BOTONES DE DESCARGA (SOLO VISIBLES TRAS REGISTRAR) ---
+if st.session_state.firma_registrada == firma_actual and nombre_limpio and correo_limpio:
+    bytes_png, bytes_pdf = generar_archivos_ram(
+        nombre_limpio, tuple(valores), promedio, fecha_hora_visible
+    )
+    nombre_archivo_base = nombre_limpio.replace(" ", "_")
+    fecha_archivo = ahora_cdmx.strftime("%Y%m%d_%H%M")
 
-if exportacion_lista:
     col_png, col_pdf = st.columns(2)
-
     with col_png:
         st.download_button(
             label="📸 Descargar Imagen (PNG)",
             data=bytes_png,
-            file_name=f"Rueda_{nombre_limpio}_{fecha_archivo}.png",
+            file_name=f"Rueda_Rover_{nombre_archivo_base}_{fecha_archivo}.png",
             mime="image/png",
             use_container_width=True
         )
-
     with col_pdf:
         st.download_button(
             label="📄 Descargar Documento (PDF)",
             data=bytes_pdf,
-            file_name=f"Rueda_{nombre_limpio}_{fecha_archivo}.pdf",
+            file_name=f"Rueda_Rover_{nombre_archivo_base}_{fecha_archivo}.pdf",
             mime="application/pdf",
             use_container_width=True
         )
-
-    with st.expander("📩 ¿Prefieres recibir el PDF en tu correo electrónico?"):
-        correo_input = st.text_input("Tu correo electrónico:", placeholder="ejemplo@correo.com")
-        if st.button("Enviar a mi correo y registrar", use_container_width=True):
-            if not correo_input or "@" not in correo_input or "." not in correo_input:
-                st.warning("⚠️ Por favor escribe un correo electrónico válido.")
-            else:
-                with st.spinner("Guardando registro y enviando correo..."):
-                    firma_con_correo = f"{firma_actual}_{correo_input.strip()}"
-                    if st.session_state.ultima_firma_guardada != firma_con_correo:
-                        try:
-                            ok, _ = guardar_en_google_sheets(
-                                fecha_hora_visible, nombre_display, correo_input.strip(),
-                                valores, promedio, area_fuerte, area_debil
-                            )
-                            if ok:
-                                st.session_state.ultima_firma_guardada = firma_con_correo
-                        except Exception:
-                            pass
-
-                    try:
-                        nombre_pdf = f"Rueda_{nombre_limpio}_{fecha_archivo}.pdf"
-                        enviar_correo_ram(correo_input.strip(), nombre_display, bytes_pdf, nombre_pdf, promedio, area_fuerte)
-                        st.success(f"✅ ¡Listo! Resultado registrado y enviado a {correo_input}.")
-                    except Exception as e:
-                        st.error(f"❌ No se pudo enviar el correo. Usa los botones de descarga directa de arriba. ({e})")
+elif st.session_state.firma_registrada != "" and st.session_state.firma_registrada != firma_actual:
+    st.caption("🔄 *Modificaste algún valor, nombre o correo. Vuelve a presionar **Registrar y Desbloquear Descargas** para actualizar tu archivo.*")
