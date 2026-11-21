@@ -1,7 +1,10 @@
 import streamlit as st
 import plotly.graph_objects as go
+import matplotlib.pyplot as plt
 import pandas as pd
 import numpy as np
+import io
+import textwrap
 import requests
 import smtplib
 from email.message import EmailMessage
@@ -10,7 +13,7 @@ import pytz
 
 # --- 1. CONFIGURACIÓN DE PÁGINA ---
 st.set_page_config(
-    page_title="Oráculo Rover 2027: Rutas y Cartas Socráticas",
+    page_title="Oráculo Rover: Rutas y Cartas Socráticas",
     page_icon="🧭",
     layout="wide"
 )
@@ -19,14 +22,16 @@ def obtener_hora_cdmx():
     zona_cdmx = pytz.timezone('America/Mexico_City')
     return datetime.now(zona_cdmx)
 
+def limpiar_texto_pdf(texto):
+    """Elimina emojis/caracteres no soportados por la fuente estándar de Matplotlib al crear el PDF."""
+    if not texto:
+        return ""
+    return "".join(c for c in str(texto) if ord(c) < 65536 and c not in "🔵🟠🟢🟣🎯🌟🧭🃏📐🔴⚡🔥🏃‍♂️💡🛡️❤️🤝🕊️⚜️🏛️🛠️📏⚙️⏳🔄📋")
+
 # --- 2. CONEXIÓN AL GOOGLE SHEETS ORIGINAL ---
 @st.cache_data(ttl=30, show_spinner=False)
 def cargar_datos_sheets():
-    """
-    Lee los datos guardados por la App 1 en Google Sheets.
-    Soporta lectura vía SHEETS_WEBHOOK_URL (doGet) o vía SHEETS_CSV_URL.
-    """
-    # Opción A: Usar el mismo Webhook si ya tiene habilitado doGet(e)
+    """Lee los datos guardados por la App 1 en Google Sheets."""
     if "SHEETS_WEBHOOK_URL" in st.secrets:
         try:
             resp = requests.get(st.secrets["SHEETS_WEBHOOK_URL"], timeout=10)
@@ -38,7 +43,6 @@ def cargar_datos_sheets():
         except Exception:
             pass
 
-    # Opción B: Lectura directa por URL de Google Sheets publicado como CSV
     if "SHEETS_CSV_URL" in st.secrets:
         df = pd.read_csv(st.secrets["SHEETS_CSV_URL"])
         return normalizar_columnas(df)
@@ -46,10 +50,9 @@ def cargar_datos_sheets():
     return pd.DataFrame()
 
 def normalizar_columnas(df):
-    """Asegura que las 12 columnas originales de la App 1 tengan nombres estándar por posición."""
+    """Asegura nombres estándar en las 12 columnas originales de la App 1."""
     if df.empty:
         return df
-    # Si la hoja no tenía encabezados exactos, mapeamos por las 12 posiciones del payload de la App 1
     columnas_esperadas = [
         "fecha_hora", "nombre", "correo",
         "corporalidad", "creatividad", "caracter",
@@ -67,8 +70,8 @@ def normalizar_columnas(df):
 # --- 3. MOTOR DE ASOCIACIÓN: 6 ÁREAS -> 4 RUTAS + CARTAS SOCRÁTICAS ---
 def analizar_perfil_rover(valores):
     """
-    Recibe la lista [corporalidad, creatividad, caracter, afectividad, sociabilidad, espiritualidad]
-    y devuelve las 4 Rutas (Kikapú, Otomí, Maya, Wixárika), la lectura geométrica y las Cartas Socráticas.
+    Traduce [corporalidad, creatividad, caracter, afectividad, sociabilidad, espiritualidad]
+    a las 4 Rutas (Kikapú, Otomí, Maya, Wixárika), geometría y Cartas Socráticas.
     """
     promedio = float(np.mean(valores))
     desviacion = float(np.std(valores))
@@ -89,7 +92,7 @@ def analizar_perfil_rover(valores):
     mazo_confrontacion = {
         0: (
             "Carta 1.1 – Corporalidad (Vinculada a Ruta Kikapú)",
-            "Mira el número que te pusiste en Corporalidad. Si sigues comiendo, durmiendo y entrenando exactamente igual que en los últimos tres meses, ¿cómo va a estar tu cuerpo a mitad de 2027? Deja los buenos deseos: ¿qué hábito físico te está saboteando hoy y qué vas a hacer con ese conocimiento para que no se quede solo en entrenar para ti, sino que le sirva también a otros?"
+            "Mira el número que te pusiste en Corporalidad. Si sigues comiendo, durmiendo y entrenando exactamente igual que en los últimos tres meses, ¿cómo va a estar tu cuerpo en los próximos seis meses? Deja los buenos deseos: ¿qué hábito físico te está saboteando hoy y qué vas a hacer con ese conocimiento para que no se quede solo en entrenar para ti, sino que le sirva también a otros?"
         ),
         1: (
             "Carta 1.2 – Creatividad (Vinculada a Ruta Otomí y Ruta Maya)",
@@ -97,11 +100,11 @@ def analizar_perfil_rover(valores):
         ),
         2: (
             "Carta 1.3 – Carácter (Vinculada a Ruta Otomí)",
-            "Ser Rover es gobernar tu propia vida. ¿Cuántas cosas dejaste a medias este año porque 'no tuviste tiempo' o porque nadie te estuvo presionando? Mira tu puntaje en Carácter: ¿qué compromiso real estás evadiendo ahora mismo en tus estudios, tu casa o el Clan, y qué sistema vas a usar en 2027 para cumplir tu palabra aunque no tengas ganas?"
+            "Ser Rover es gobernar tu propia vida. ¿Cuántas cosas dejaste a medias últimamente porque 'no tuviste tiempo' o porque nadie te estuvo presionando? Mira tu puntaje en Carácter: ¿qué compromiso real estás evadiendo ahora mismo en tus estudios, tu casa o el Clan, y qué sistema vas a usar en este ciclo para cumplir tu palabra aunque no tengas ganas?"
         ),
         3: (
             "Carta 1.4 – Afectividad (Vinculada a Ruta Kikapú y Ruta Wixárika)",
-            "Cuando estás bajo presión por la escuela, el trabajo o problemas personales, ¿cómo gestionas el estrés y cómo tratas a la gente que te rodea? ¿Qué límite sano necesitas poner en tus relaciones o qué red de apoyo necesitas construir este trimestre para no quemarte?"
+            "Cuando estás bajo presión por la escuela, el trabajo o problemas personales, ¿cómo gestionas el estrés y cómo tratas a la gente que te rodea? ¿Qué límite sano necesitas poner en tus relaciones o qué red de apoyo necesitas construir este ciclo para no quemarte?"
         ),
         4: (
             "Carta 1.5 – Sociabilidad y Comunidad (Vinculada a Ruta Wixárika)",
@@ -109,7 +112,7 @@ def analizar_perfil_rover(valores):
         ),
         5: (
             "Carta 1.6 – Espiritualidad y Naturaleza (Vinculada a Ruta Maya y Ruta Wixárika)",
-            "Tu puntaje en Espiritualidad habla de tu congruencia entre lo que dices que valoras y cómo vives. Mira tu consumo diario (lo que compras, la basura que generas, tu impacto al salir al aire libre): ¿qué comodidad personal estás dispuesto a recortar en 2027 para reducir tu huella ambiental y enseñar a otros a hacer lo mismo?"
+            "Tu puntaje en Espiritualidad habla de tu congruencia entre lo que dices que valoras y cómo vives. Mira tu consumo diario (lo que compras, la basura que generas, tu impacto al salir al aire libre): ¿qué comodidad personal estás dispuesto a recortar en este ciclo para reducir tu huella ambiental y enseñar a otros a hacer lo mismo?"
         )
     }
 
@@ -118,10 +121,9 @@ def analizar_perfil_rover(valores):
     carta_fortaleza = (
         f"Carta 1.7 – El Espejo de la Fortaleza ({ruta_fortaleza}): "
         f"Obtuviste {valores[indice_max]}/10 en tu área más alta. En el Clan, una habilidad que ya dominas y te guardas para ti no sirve de nada. "
-        f"¿En qué Especialidad para la Vida la vas a convertir este trimestre y a quién se la vas a enseñar o qué problema comunitario vas a resolver con ella?"
+        f"¿En qué Especialidad para la Vida la vas a convertir en este ciclo y a quién se la vas a enseñar o qué problema comunitario vas a resolver con ella?"
     )
 
-    # Evaluación geométrica de la Rueda
     if desviacion >= 2.2:
         geometria = "Polígono Polarizado (Desbalance Crítico)"
         carta_geometria = (
@@ -139,7 +141,7 @@ def analizar_perfil_rover(valores):
         geometria = "Polígono Equilibrado en Expansión"
         carta_geometria = (
             "Carta 3.6 – Alianzas de Fuego: Tienes tracción estable. Voltea a ver las Ruedas de tus hermanos de Malinalli y Tic Temoaya Ochan: "
-            "¿quién tiene una debilidad donde tú eres fuerte? ¿Qué proyecto inter-clan o campamento técnico van a armar juntos en el Trimestre 1?"
+            "¿quién tiene una debilidad donde tú eres fuerte? ¿Qué proyecto inter-clan o campamento técnico van a armar juntos en el próximo ciclo?"
         )
 
     return rutas, ruta_enfoque, ruta_fortaleza, geometria, titulo_carta_debil, texto_carta_debil, carta_fortaleza, carta_geometria
@@ -176,60 +178,188 @@ def dibujar_radar_rover(valores, nombre, promedio, geometria):
     )
     return fig
 
+# --- 4. GENERADORES DE ARCHIVOS ADJUNTOS (MARKDOWN + PDF EN RAM) ---
+def generar_markdown_ciclo(payload):
+    """Genera el contenido del archivo .md listo para Notion y respaldo."""
+    return f"""# Ciclo Personal de Programa — {payload['nombre']}
+* **Clan:** {payload['clan']}
+* **Periodo del Ciclo:** {payload['trimestre']}
+* **Fecha de registro / modificación:** {payload['fecha_hora']} (CDMX)
+* **Correo del Rover:** {payload['correo']}
+
+---
+
+## 1. Diagnóstico de Rutas de Progresión
+* **Ruta Kikapú (Salud y Bienestar):** {payload['pts_kikapu']}/10
+* **Ruta Otomí (Habilidades para la Vida):** {payload['pts_otomi']}/10
+* **Ruta Maya (Medio Ambiente y Sustentabilidad):** {payload['pts_maya']}/10
+* **Ruta Wixárika (Paz y Participación Comunitaria):** {payload['pts_wixarika']}/10
+
+* **Ruta de Enfoque elegida:** {payload['ruta_enfoque']}
+* **Ruta de Fortaleza (Especialidad / Servicio):** {payload['ruta_fortaleza']}
+* **Geometría de la Rueda:** {payload['geometria']}
+
+---
+
+## 2. Confrontación Socrática
+* **Carta trabajada:** {payload['carta_socratica']}
+* **Respuesta del Rover:**
+> {payload['respuesta_socratica']}
+
+---
+
+## 3. Objetivo SMART del Ciclo Personal
+
+| Criterio SMART | Definición Aprobada | Estado |
+| :--- | :--- | :--- |
+| **S (Específico)** | {payload['obj_s']} | ✅ |
+| **M (Medible)** | {payload['obj_m']} | ✅ |
+| **A (Alcanzable)** | {payload['obj_a']} | ✅ |
+| **R (Realista / Asesor)** | {payload['obj_r']} | ✅ |
+| **T (Tiempo límite)** | {payload['obj_t']} | ✅ |
+
+---
+
+## 4. Acciones Educativas (Metodología PER)
+* **1. PLANEA (Conozco):** {payload['per_planea']}
+* **2. EJECUTA (Aplico):** {payload['per_ejecuta']}
+* **3. REVISA (Comparto):** {payload['per_revisa']}
+"""
+
+def generar_pdf_ficha_ram(payload):
+    """Genera una ficha oficial en PDF (tamaño carta) en memoria RAM usando Matplotlib."""
+    fig = plt.figure(figsize=(8.5, 11))
+    fig.patch.set_facecolor('white')
+    ax = fig.add_axes([0.07, 0.05, 0.86, 0.90])
+    ax.axis('off')
+
+    y = 0.98
+    def escribir_bloque(titulo, texto, espacio_titulo=0.025, espacio_linea=0.020, ancho=92, color_titulo='#0F172A'):
+        nonlocal y
+        if titulo:
+            ax.text(0.0, y, limpiar_texto_pdf(titulo), fontsize=10.5, fontweight='bold', color=color_titulo, va='top')
+            y -= espacio_titulo
+        if texto:
+            for parrafo in limpiar_texto_pdf(texto).split('\n'):
+                lineas = textwrap.wrap(parrafo, width=ancho) or [""]
+                for linea in lineas:
+                    if y < 0.04:
+                        break
+                    ax.text(0.01, y, linea, fontsize=9.2, color='#1E293B', va='top')
+                    y -= espacio_linea
+            y -= 0.012
+
+    # Encabezado
+    ax.text(0.0, y, "FICHA DE CICLO PERSONAL DE PROGRAMA — CLAN DE ROVERS", fontsize=13.5, fontweight='bold', color='#1E293B', va='top')
+    y -= 0.032
+    ax.text(0.0, y, f"Rover: {limpiar_texto_pdf(payload['nombre'])}  |  Clan: {limpiar_texto_pdf(payload['clan'])}  |  Periodo: {limpiar_texto_pdf(payload['trimestre'])}", fontsize=10, fontweight='bold', color='#334155', va='top')
+    y -= 0.022
+    ax.text(0.0, y, f"Fecha de registro/actualizacion: {payload['fecha_hora']} (CDMX)  |  Correo: {payload['correo']}", fontsize=8.5, color='#64748B', va='top')
+    y -= 0.022
+    ax.plot([0, 1], [y, y], color='#CBD5E1', linewidth=1.2)
+    y -= 0.020
+
+    # Sección 1: Rutas
+    rutas_resumen = (
+        f"Kikapu (Salud): {payload['pts_kikapu']}/10  |  Otomi (Habilidades): {payload['pts_otomi']}/10  |  "
+        f"Maya (Ambiente): {payload['pts_maya']}/10  |  Wixarika (Paz/Comunidad): {payload['pts_wixarika']}/10\n"
+        f"Ruta de Enfoque elegida: {payload['ruta_enfoque']}\n"
+        f"Ruta de Fortaleza (Especialidad): {payload['ruta_fortaleza']}  |  Geometria: {payload['geometria']}"
+    )
+    escribir_bloque("1. DIAGNOSTICO DE RUTAS DE PROGRESION", rutas_resumen, color_titulo='#0F4C81')
+
+    # Sección 2: Carta Socrática
+    escribir_bloque(
+        f"2. CONFRONTACION SOCRATICA ({payload['carta_socratica']})",
+        f"Reflexion del Rover: {payload['respuesta_socratica']}",
+        color_titulo='#9A3412'
+    )
+
+    # Sección 3: SMART
+    smart_txt = (
+        f"[S] Especifico: {payload['obj_s']}\n"
+        f"[M] Medible: {payload['obj_m']}\n"
+        f"[A] Alcanzable: {payload['obj_a']}\n"
+        f"[R] Realista / Asesor: {payload['obj_r']}\n"
+        f"[T] Tiempo limite: {payload['obj_t']}"
+    )
+    escribir_bloque("3. OBJETIVO SMART DEL CICLO PERSONAL", smart_txt, color_titulo='#065F46')
+
+    # Sección 4: PER
+    per_txt = (
+        f"PLANEA (Conozco): {payload['per_planea']}\n"
+        f"EJECUTA (Aplico): {payload['per_ejecuta']}\n"
+        f"REVISA (Comparto): {payload['per_revisa']}"
+    )
+    escribir_bloque("4. PLAN DE ACCIONES EDUCATIVAS (METODOLOGIA PER)", per_txt, color_titulo='#5B21B6')
+
+    buf_pdf = io.BytesIO()
+    fig.savefig(buf_pdf, format='pdf', bbox_inches='tight', facecolor='white')
+    plt.close(fig)
+    return buf_pdf.getvalue()
+
 def guardar_ciclo_fase2(payload):
-    """Guarda las Rutas, respuesta socrática y Ciclo SMART+PER en la pestaña Ciclos_2027 de Google Sheets."""
+    """Guarda las Rutas, respuesta socrática y Ciclo SMART+PER en Google Sheets."""
     if "SHEETS_WEBHOOK_URL" not in st.secrets:
         return False, "Falta SHEETS_WEBHOOK_URL en Secrets."
-    payload["origen"] = "FASE_2_SMART"
-    resp = requests.post(st.secrets["SHEETS_WEBHOOK_URL"], json=payload, timeout=10)
+    payload_envio = dict(payload)
+    payload_envio["origen"] = "FASE_2_SMART"
+    resp = requests.post(st.secrets["SHEETS_WEBHOOK_URL"], json=payload_envio, timeout=10)
     return (resp.status_code == 200), resp.text
 
-def enviar_correo_ciclo_2027(payload):
-    """Envía el Ciclo Personal SMART y PER al Rover y al Consejero Responsable."""
+def enviar_correo_ciclo(payload, bytes_pdf, texto_md):
+    """Envía el Ciclo Personal con archivos adjuntos (.pdf y .md) al Consejero y copia al Rover."""
     remitente = st.secrets["EMAIL_SENDER"]
     correo_responsable = st.secrets.get("ADMIN_EMAIL", remitente)
-    destinatarios = [payload["correo"]]
-    if correo_responsable not in destinatarios:
-        destinatarios.append(correo_responsable)
 
-    msg = EmailMessage()
-    msg["Subject"] = f"🧭 Ciclo Personal 2027 ({payload['trimestre']}): {payload['nombre']} - Clan {payload['clan']}"
-    msg["From"] = remitente
-    msg["To"] = ", ".join(destinatarios)
-
-    cuerpo = (
-        f"¡Siempre Listo para Servir, {payload['nombre']} (Clan {payload['clan']})!\n\n"
-        f"Se ha generado tu Ruta y Ciclo Personal de Programa 2027 a partir de tu Rueda de la Vida:\n\n"
-        f"=== 1. ASOCIACIÓN CON LAS 4 RUTAS ===\n"
-        f"• Ruta Kikapú (Salud y Bienestar): {payload['pts_kikapu']}/10\n"
-        f"• Ruta Otomí (Habilidades para la Vida): {payload['pts_otomi']}/10\n"
-        f"• Ruta Maya (Medio Ambiente y Sustentabilidad): {payload['pts_maya']}/10\n"
-        f"• Ruta Wixárika (Paz y Participación Comunitaria): {payload['pts_wixarika']}/10\n"
-        f"-> Ruta de Enfoque elegida: {payload['ruta_enfoque']}\n"
-        f"-> Ruta de Fortaleza (Especialidad): {payload['ruta_fortaleza']}\n\n"
-        f"=== 2. CONFRONTACIÓN SOCRÁTICA ===\n"
-        f"Carta: {payload['carta_socratica']}\n"
-        f"Tu Respuesta: \"{payload['respuesta_socratica']}\"\n\n"
-        f"=== 3. OBJETIVO SMART ({payload['trimestre']}) ===\n"
-        f"• [S] Específico (Qué y Para qué): {payload['obj_s']}\n"
-        f"• [M] Medible (Indicador numérico): {payload['obj_m']}\n"
-        f"• [A] Alcanzable (Horario y recursos): {payload['obj_a']}\n"
-        f"• [R] Realista (Asesor externo y Plan B): {payload['obj_r']}\n"
-        f"• [T] Tiempo límite (Fechas de corte): {payload['obj_t']}\n\n"
-        f"=== 4. ACCIONES EDUCATIVAS (METODOLOGÍA PER) ===\n"
-        f"• PLANEA (Conozco): {payload['per_planea']}\n"
-        f"• EJECUTA (Aplico): {payload['per_ejecuta']}\n"
-        f"• REVISA (Comparto en servicio): {payload['per_revisa']}\n\n"
-        f"Copia estos bloques directamente en tu Agenda Rover 2027 en Notion."
-    )
-    msg.set_content(cuerpo)
+    nombre_archivo_base = payload["nombre"].replace(" ", "_")
+    sello_fecha = obtener_hora_cdmx().strftime("%Y%m%d_%H%M")
+    nombre_pdf = f"Ciclo_Personal_{payload['clan']}_{nombre_archivo_base}_{sello_fecha}.pdf"
+    nombre_md = f"Ciclo_Personal_{payload['clan']}_{nombre_archivo_base}_{sello_fecha}.md"
+    bytes_md = texto_md.encode("utf-8")
 
     with smtplib.SMTP_SSL("smtp.gmail.com", 465) as smtp:
         smtp.login(remitente, st.secrets["EMAIL_PASSWORD"])
-        smtp.send_message(msg)
 
-# --- 4. BARRA LATERAL Y NAVEGACIÓN ---
-st.sidebar.title("⚜️ Sistema Rover 2027")
+        # 1. Correo exclusivo para ti (Consejero Responsable) con archivos adjuntos
+        msg_admin = EmailMessage()
+        msg_admin["Subject"] = f"📋 Ciclo Personal Actualizado: {payload['nombre']} ({payload['clan']} - {payload['trimestre']})"
+        msg_admin["From"] = remitente
+        msg_admin["To"] = correo_responsable
+        msg_admin.set_content(
+            f"El Rover {payload['nombre']} (Clan {payload['clan']}) ha registrado o modificado su Ciclo Personal.\n\n"
+            f"• Periodo: {payload['trimestre']}\n"
+            f"• Ruta de Enfoque: {payload['ruta_enfoque']}\n"
+            f"• Ruta de Fortaleza: {payload['ruta_fortaleza']}\n"
+            f"• Fecha de actualización: {payload['fecha_hora']} (CDMX)\n\n"
+            f"Se adjuntan dos archivos listos para tu seguimiento:\n"
+            f"1) {nombre_pdf} (Ficha en PDF para expediente).\n"
+            f"2) {nombre_md} (Archivo Markdown listo para importar a Notion)."
+        )
+        msg_admin.add_attachment(bytes_pdf, maintype="application", subtype="pdf", filename=nombre_pdf)
+        msg_admin.add_attachment(bytes_md, maintype="text", subtype="markdown", filename=nombre_md)
+        smtp.send_message(msg_admin)
+
+        # 2. Copia para el Rover con sus archivos adjuntos
+        if payload["correo"] and "@" in payload["correo"]:
+            msg_rover = EmailMessage()
+            msg_rover["Subject"] = f"🧭 Tu Ciclo Personal ({payload['trimestre']}): {payload['nombre']} - Clan {payload['clan']}"
+            msg_rover["From"] = remitente
+            msg_rover["To"] = payload["correo"]
+            msg_rover.set_content(
+                f"¡Siempre Listo para Servir, {payload['nombre']}!\n\n"
+                f"Tu Ciclo Personal ({payload['trimestre']}) ha sido guardado y enviado a tu Consejero Rover.\n"
+                f"Adjunto encontrarás tu ficha en PDF y tu archivo Markdown (.md) listo para subir a tu Agenda Rover en Notion.\n\n"
+                f"¡Buena caza y largas lunas!"
+            )
+            msg_rover.add_attachment(bytes_pdf, maintype="application", subtype="pdf", filename=nombre_pdf)
+            msg_rover.add_attachment(bytes_md, maintype="text", subtype="markdown", filename=nombre_md)
+            smtp.send_message(msg_rover)
+
+    return nombre_pdf, nombre_md
+
+# --- 5. BARRA LATERAL Y NAVEGACIÓN ---
+st.sidebar.title("⚜️ Sistema Rover")
 modo = st.sidebar.radio(
     "Selecciona la vista:",
     ["🧭 1. Taller Individual (Rutas + Cartas + SMART)", "🏛️ 2. Vista Maestra Consejero (Macrociclo Clanes)"]
@@ -243,7 +373,7 @@ df_registros = cargar_datos_sheets()
 if df_registros.empty:
     st.warning(
         "⚠️ No se pudieron cargar automáticamente los registros de Google Sheets. "
-        "Verifica que hayas agregado la función `doGet(e)` en tu Apps Script o carga aquí el archivo CSV descargado de tu Google Sheets:"
+        "Verifica que hayas agregado la función `doGet(e)` en tu Apps Script o carga aquí el archivo CSV descargado:"
     )
     archivo_csv = st.file_uploader("Subir CSV de Google Sheets (Respaldo manual)", type=["csv"])
     if archivo_csv:
@@ -253,14 +383,13 @@ if df_registros.empty:
 # MODO 1: TALLER INDIVIDUAL DEL ROVER (RUTAS, CARTAS SOCRÁTICAS Y DISEÑO SMART)
 # ==============================================================================
 if modo == "🧭 1. Taller Individual (Rutas + Cartas + SMART)":
-    st.title("🧭 Fase 2: De tu Rueda de la Vida a tu Ruta y Ciclo 2027")
+    st.title("🧭 Fase 2: De tu Rueda de la Vida a tu Ruta y Ciclo Personal")
     st.markdown(
         "Selecciona tu registro guardado en la **Rueda de la Vida**. El sistema analizará la geometría de tu diagrama, "
         "calculará tu afinidad con las **Rutas Kikapú, Otomí, Maya y Wixárika**, y te entregará tus **Cartas Socráticas**."
     )
 
     if not df_registros.empty:
-        # Si un Rover se registró más de una vez, tomamos su registro más reciente
         nombres_disponibles = df_registros["nombre"].dropna().unique().tolist()
         col_sel1, col_sel2 = st.columns([2, 1])
         with col_sel1:
@@ -283,7 +412,6 @@ if modo == "🧭 1. Taller Individual (Rutas + Cartas + SMART)":
 
         st.divider()
 
-        # Visualización del Diagrama + Puntajes de las 4 Rutas
         col_graf, col_rutas = st.columns([1.1, 1])
         with col_graf:
             fig_radar = dibujar_radar_rover(valores_rover, rover_seleccionado, float(np.mean(valores_rover)), geometria)
@@ -321,11 +449,21 @@ if modo == "🧭 1. Taller Individual (Rutas + Cartas + SMART)":
         # --- CONSTRUCTOR GUIADO SMART (MAZO 2) Y PER (MAZO 3) ---
         st.divider()
         st.subheader("🛠️ PASO B: Bisturí SMART y Acciones PER (Mazos 2 y 3)")
-        st.markdown("Pasa tu meta por las cartas del **Mazo 2 (SMART)** y **Mazo 3 (PER)**. Al guardar, obtendrás el bloque listo para pegar en tu **Notion**.")
+        st.markdown("Pasa tu meta por las cartas del **Mazo 2 (SMART)** y **Mazo 3 (PER)**. Al guardar, se enviarán tus archivos en **PDF y Markdown** a tu Consejero y a tu correo.")
 
         col_trim, col_ruta_sel = st.columns(2)
         with col_trim:
-            trimestre = st.selectbox("Trimestre del Ciclo Personal 2027:", ["T1 (Ene - Mar 2027)", "T2 (Abr - Jun 2027)", "T3 (Jul - Sep 2027)", "T4 (Oct - Dic 2027)"])
+            trimestre = st.selectbox(
+                "Periodo del Ciclo Personal:",
+                [
+                    "Trimestre 1 (Ene - Mar)",
+                    "Trimestre 2 (Abr - Jun)",
+                    "Trimestre 3 (Jul - Sep)",
+                    "Trimestre 4 (Oct - Dic)",
+                    "Ciclo Cuatrimestral (4 meses)",
+                    "Ciclo Semestral (6 meses)"
+                ]
+            )
         with col_ruta_sel:
             lista_rutas = list(rutas.keys())
             idx_sugerido = lista_rutas.index(ruta_enfoque)
@@ -352,25 +490,24 @@ if modo == "🧭 1. Taller Individual (Rutas + Cartas + SMART)":
             )
             obj_t = st.text_input(
                 "⏳ [T] Tiempo límite (Carta 2.8 - Fecha de inicio, fecha de ejecución de servicio y fecha de Parlamento):",
-                placeholder="Ej: Inicio 15/Ene/2027 | Servicio 13/Mar/2027 | Revisión Parlamento 27/Mar/2027."
+                placeholder="Ej: Inicio Semana 1 | Servicio comunitario Semana 10 | Revisión Parlamento Semana 12."
             )
 
         st.markdown("#### 🔄 Metodología PER (Conozco, Aplico, Comparto)")
         c_p, c_e, c_r = st.columns(3)
         with c_p:
-            per_planea = st.text_area("1️⃣ PLANEA / Conozco (Carta 3.1)", placeholder="Investigación teórica, contacto con asesor externo y protocolo A Salvo del Peligro (SfH)...")
+            per_planea = st.text_area("1️⃣ PLANEA / Conozco (Carta 3.1)", placeholder="Investigación teórica, contacto con asesor externo y protocolo A Salvo del Peligro...")
         with c_e:
             per_ejecuta = st.text_area("2️⃣ EJECUTA / Aplico (Carta 3.2)", placeholder="Práctica constante fuera y dentro del Clan, bitácora y pruebas fotográficas en Drive...")
         with c_r:
-            per_revisa = st.text_area("3️⃣ REVISA / Comparto (Carta 3.3)", placeholder="Servicio comunitario, evaluación 360° y registro en sdgs.scout.org / ExplorApp...")
+            per_revisa = st.text_area("3️⃣ REVISA / Comparto (Carta 3.3)", placeholder="Servicio comunitario, evaluación 360° y registro en sdgs.scout.org...")
 
-        # Validador automático de verbos ambiguos
         verbos_ambiguos = ["mejorar", "intentar", "tratar", "echarle ganas", "apoyar", "fomentar", "concientizar"]
         alerta_ambigua = [v for v in verbos_ambiguos if v in obj_s.lower()]
         if alerta_ambigua:
-            st.warning(f"⚠️ **Filtro Socrático activado:** Usaste palabras ambiguas ({', '.join(alerta_ambigua)}) en tu objetivo [S]. cámbialas por un verbo de acción verificable (ej. *Construir, Certificar, Reducir, Impartir, Diseñar*).")
+            st.warning(f"⚠️ **Filtro Socrático activado:** Usaste palabras ambiguas ({', '.join(alerta_ambigua)}) en tu objetivo [S]. Cámbialas por un verbo de acción verificable (ej. *Construir, Certificar, Reducir, Impartir, Diseñar*).")
 
-        if st.button("🚀 Guardar Mi Ciclo 2027 en Google Sheets, Enviar a mi Correo y Generar Código para Notion", type="primary", use_container_width=True):
+        if st.button("🚀 Guardar Ciclo Personal y Enviar Archivos (PDF + Markdown) a mi Consejero", type="primary", use_container_width=True):
             if not all([respuesta_socratica.strip(), obj_s.strip(), obj_m.strip(), obj_a.strip(), obj_r.strip(), obj_t.strip()]):
                 st.error("⚠️ Debes responder tu Carta Socrática y completar los 5 campos SMART antes de guardar.")
             else:
@@ -399,45 +536,53 @@ if modo == "🧭 1. Taller Individual (Rutas + Cartas + SMART)":
                     "per_ejecuta": per_ejecuta.strip(),
                     "per_revisa": per_revisa.strip()
                 }
-                with st.spinner("Registrando tu Ciclo Personal 2027 y enviando copia a tu Consejero..."):
-                    ok_s, msg_s = guardar_ciclo_fase2(payload_f2)
+
+                with st.spinner("Generando archivos (PDF y Markdown), guardando en Google Sheets y enviando a tu Consejero..."):
+                    markdown_notion = generar_markdown_ciclo(payload_f2)
+                    bytes_pdf = generar_pdf_ficha_ram(payload_f2)
+
+                    guardar_ciclo_fase2(payload_f2)
                     try:
-                        enviar_correo_ciclo_2027(payload_f2)
-                        st.success(f"✅ ¡Ciclo Personal 2027 guardado y enviado por correo a {correo_rover} y a tu Consejero!")
+                        nombre_pdf, nombre_md = enviar_correo_ciclo(payload_f2, bytes_pdf, markdown_notion)
+                        st.success(f"✅ ¡Listo! Se guardó tu registro y se enviaron los archivos **{nombre_pdf}** y **{nombre_md}** al correo de tu Consejero Rover y a tu correo ({correo_rover}).")
                     except Exception as e:
-                        st.warning(f"Se procesó tu ficha, pero hubo un detalle con el correo: {e}")
+                        nombre_pdf = f"Ciclo_Personal_{rover_seleccionado.replace(' ', '_')}.pdf"
+                        nombre_md = f"Ciclo_Personal_{rover_seleccionado.replace(' ', '_')}.md"
+                        st.warning(f"Se generaron tus archivos, pero hubo un detalle al enviar el correo: {e}")
 
-                st.subheader("📋 Copia y pega este bloque directamente en tu Agenda Rover de Notion:")
-                markdown_notion = f"""### 🧭 Ciclo Personal: {trimestre} — {rover_seleccionado} (Clan {clan_seleccionado})
-* **Ruta de Enfoque:** {ruta_elegida} | **Ruta de Fortaleza (Especialidad):** {ruta_fortaleza}
-* **Carta Socrática Trabajada ({titulo_carta_debil}):** *"{respuesta_socratica.strip()}"*
+                # Botones de descarga inmediata
+                col_dl1, col_dl2 = st.columns(2)
+                with col_dl1:
+                    st.download_button(
+                        label="📄 Descargar mi Ficha en PDF",
+                        data=bytes_pdf,
+                        file_name=nombre_pdf,
+                        mime="application/pdf",
+                        use_container_width=True
+                    )
+                with col_dl2:
+                    st.download_button(
+                        label="📝 Descargar archivo Markdown (.md) para Notion",
+                        data=markdown_notion.encode("utf-8"),
+                        file_name=nombre_md,
+                        mime="text/markdown",
+                        use_container_width=True
+                    )
 
-| Criterio SMART | Definición Aprobada | Estado |
-| :--- | :--- | :--- |
-| **S (Específico)** | {obj_s.strip()} | ✅ |
-| **M (Medible)** | {obj_m.strip()} | ✅ |
-| **A (Alcanzable)** | {obj_a.strip()} | ✅ |
-| **R (Realista / Asesor)** | {obj_r.strip()} | ✅ |
-| **T (Tiempo límite)** | {obj_t.strip()} | ✅ |
-
-* **1. PLANEA (Conozco):** {per_planea.strip()}
-* **2. EJECUTA (Aplico):** {per_ejecuta.strip()}
-* **3. REVISA (Comparto):** {per_revisa.strip()}
-"""
+                st.subheader("📋 O copia y pega este bloque directamente en tu Agenda Rover de Notion:")
                 st.code(markdown_notion, language="markdown")
 
 # ==============================================================================
-# MODO 2: VISTA MAESTRA DEL CONSEJERO (CRUCE PARA LOS 4 CICLOS DE CLAN 2027)
+# MODO 2: VISTA MAESTRA DEL CONSEJERO (CRUCE PARA LOS 4 CICLOS DE CLAN)
 # ==============================================================================
 else:
-    st.title("🏛️ Vista Maestra: Generador de los 4 Ciclos de Clan 2027")
+    st.title("🏛️ Vista Maestra: Generador de los 4 Ciclos de Clan")
     st.markdown(
         "Esta vista lee todos los registros del Google Sheets original de la **Rueda de la Vida**, calcula las **4 Rutas (Kikapú, Otomí, Maya y Wixárika)** "
-        "de todo el Clan y agrupa a los Rovers para diseñar los **4 Ciclos de Programa 2027** de **Malinalli** y **Tic Temoaya Ochan**."
+        "de todo el Clan y agrupa a los Rovers para diseñar los **4 Ciclos de Programa** de **Malinalli** y **Tic Temoaya Ochan**."
     )
 
     if not df_registros.empty:
-        # Tomar el último registro único por cada Rover
         df_unicos = df_registros.drop_duplicates(subset=["nombre"], keep="last").copy()
 
         filas_procesadas = []
@@ -467,7 +612,7 @@ else:
 
         st.divider()
         st.subheader("🤝 2. Agrupación Automática de Equipos por Ruta (Para el Parlamento Rover)")
-        st.markdown("Usa estos grupos en la sesión de diciembre/enero para sentar juntos a los Rovers que comparten la misma **Ruta de Enfoque** y conectarlos con quienes tienen esa misma ruta como **Fortaleza**:")
+        st.markdown("Usa estos grupos en el Parlamento para sentar juntos a los Rovers que comparten la misma **Ruta de Enfoque** y conectarlos con quienes tienen esa misma ruta como **Fortaleza**:")
 
         col_g1, col_g2 = st.columns(2)
         rutas_nombres = [
