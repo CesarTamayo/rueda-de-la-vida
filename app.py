@@ -129,7 +129,7 @@ def enviar_correos_ram(email_rover, nombre_usuario, bytes_pdf, nombre_archivo, p
             f"• Fortaleza principal: {area_fuerte}\n"
             f"• Área de oportunidad: {area_debil}\n\n"
             f"Adjunto encontrarás tu mapa visual en formato PDF para tu seguimiento personal en el Clan.\n"
-            f"¡Buena caza y largas lunas!"
+            f"¡Mucho éxito remando tu propia canoa!"
         )
         msg_rover.set_content(cuerpo_rover)
         msg_rover.add_attachment(bytes_pdf, maintype='application', subtype='pdf', filename=nombre_archivo)
